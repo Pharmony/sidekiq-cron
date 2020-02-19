@@ -59,6 +59,7 @@ _Job properties_:
  'cron'  => '1 * * * *',  # execute at 1 minute of every hour, ex: 12:01, 13:01, 14:01, 15:01...etc(HH:MM)
  'class' => 'MyClass',
  #OPTIONAL
+ 'namespace' => 'YourNamespace', # groups jobs together in a namspace (Default value is 'default')
  'queue' => 'name of queue',
  'args'  => '[Array or Hash] of arguments which will be passed to perform method',
  'date_as_argument' => true, # add the time of execution as last argument of the perform method
@@ -80,6 +81,62 @@ If you want to have your jobs enqueued based on a different time zone you can sp
 like this `'0 22 * * 1-5 America/Chicago'`.
 
 See [rufus-scheduler documentation](https://github.com/jmettraux/rufus-scheduler#a-note-about-timezones) for more information. (note. Rufus scheduler is using Fugit under the hood, so documentation for Rufus Scheduler can help you also)
+
+### Namespacing
+
+This gem can isolate jobs within namespaces.
+
+#### Default namespace
+
+When not giving a namespace, the `default` one will be used.
+
+In the case you'd like to change this value, create a new initializer like so:
+
+`config/initializers/sidekiq-cron.rb`:
+
+```ruby
+Sidekiq::Cron.configure do |config|
+  config.default_namespace = 'statics'
+end
+```
+
+#### Usage
+
+When creating a new job, you can optionaly give a `namespace` attribute, and then you can pass it too in the `find` or `destroy` methods.
+
+```ruby
+Sidekiq::Cron::Job.create(
+  name: 'Hard worker - every 5min',
+  namespace: 'Foo',
+  cron: '*/5 * * * *',
+  class: 'HardWorker'
+)
+# INFO: Cron Jobs - add job with name Hard worker - every 5min in the namespace Foo
+
+# Without specifing the namespace, Sidekiq::Cron use the `default` one, therefore `count` return 0.
+Sidekiq::Cron::Job.count
+#=> 0
+
+# Searching in the job's namespace returns 1.
+Sidekiq::Cron::Job.count 'Foo'
+#=> 1
+
+# Same applies to `all`. Without a namespace, no jobs found.
+Sidekiq::Cron::Job.all
+
+# But giving the job's namespace returns it.
+Sidekiq::Cron::Job.all 'Foo'
+#=> [#<Sidekiq::Cron::Job:0x00007f7848a326a0 ... @name="Hard worker - every 5min", @namespace="Foo", @cron="*/5 * * * *", @klass="HardWorker", @status="enabled" ... >]
+
+# If you'd like to get all the jobs across all the namespaces then pass an asterisk:
+Sidekiq::Cron::Job.all '*'
+#=> [#<Sidekiq::Cron::Job ...>]
+
+job = Sidekiq::Cron::Job.find('Hard worker - every 5min', 'Foo').first
+job.destroy
+# INFO: Cron Jobs - deleted job with name Hard worker - every 5min from namespace Foo
+#=> true
+```
 
 ### What objects/classes can be scheduled
 #### Sidekiq Worker
@@ -148,6 +205,7 @@ hash = {
   },
   'My super iber cool job' => {
     'class' => 'SecondClass',
+    'namespace' => 'AnotherNamespace',
     'cron'  => '*/5 * * * *'
   }
 }
@@ -165,9 +223,10 @@ array = [
     'args'  => '(OPTIONAL) [Array or Hash]'
   },
   {
-    'name'  => 'Cool Job for Second Class',
-    'class' => 'SecondClass',
-    'cron'  => '*/5 * * * *'
+    'name'      => 'Cool Job for Second Class',
+    'namespace' => 'AnotherNamespace',
+    'class'     => 'SecondClass',
+    'cron'      => '*/5 * * * *'
   }
 ]
 
@@ -187,6 +246,7 @@ or from YML (same notation as Resque-scheduler)
 #config/schedule.yml
 
 my_first_job:
+  namespace: "MyNamespace"
   cron: "*/5 * * * *"
   class: "HardWorker"
   queue: hard_worker
@@ -212,8 +272,11 @@ or you can use for loading jobs from yml file [sidekiq-cron-tasks](https://githu
 
 #### Finding jobs
 ```ruby
-#return array of all jobs
+#return array of all jobs from the `default` namespace
 Sidekiq::Cron::Job.all
+
+#return array of all jobs from the `Whenkiqcron` namespace
+Sidekiq::Cron::Job.all('Whenkiqcron')
 
 #return one job by its unique name - case sensitive
 Sidekiq::Cron::Job.find "Job Name"
@@ -222,6 +285,9 @@ Sidekiq::Cron::Job.find "Job Name"
 Sidekiq::Cron::Job.find name: "Job Name"
 
 #if job can't be found nil is returned
+
+# return one job by its unique name from the given namespace only.
+Sidekiq::Cron::Job.find "Job Name", "Namespace name"
 ```
 
 #### Destroy jobs:
@@ -234,6 +300,9 @@ Sidekiq::Cron::Job.destroy "Job Name"
 
 #destroy found job
 Sidekiq::Cron::Job.find('Job name').destroy
+
+#destroy a job from a specific namespace
+Sidekiq::Cron::Job.find('Job name', 'Namespace name').destroy
 ```
 
 #### Work with job:
